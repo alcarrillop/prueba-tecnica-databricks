@@ -29,7 +29,9 @@ Para comprobar que la carga se puede repetir, basta con correr el paso 3 otra ve
 Pruebas automáticas (corren contra Databricks serverless con Databricks Connect):
 
 ```bash
-uv run pytest
+uv sync
+uv run pytest                   # suite completa (unos 20 minutos): crea y borra tablas test_* en el esquema
+uv run pytest -m "not tablas"   # solo las pruebas sobre DataFrames en memoria
 ```
 
 ## Arquitectura
@@ -100,7 +102,7 @@ El pipeline corre como un solo job (`pipeline_talento`) con tres tareas en caden
 | **Se calculan sobre las tablas plata, nunca sobre bronce** | Las filas en cuarentena no deben contar. |
 | **Dos tablas con las columnas exactas del enunciado (`oro_contratados_trimestre_2021` y `oro_departamentos_sobre_promedio_2021`), más una vista `_ordenada` de cada una** | Una tabla Delta no garantiza el orden de las filas al leerla. La vista trae el `ORDER BY` oficial, así que nadie tiene que recordar la collation ni el desempate. |
 | **Se recalculan completas en cada corrida (`CREATE OR REPLACE TABLE ... AS SELECT`)** | Calidad puede retirar filas de plata cuando llega un lote nuevo, así que un cálculo incremental quedaría desactualizado. Los datos son pocos y el reemplazo es atómico. No usan la hora actual ni nada aleatorio: repetir da el mismo resultado. |
-| **Año y trimestre salen de `convert_timezone('UTC', fecha_contratacion)`** | Probado con la sesión en UTC, Bogotá, Tokio y Nueva York: el resultado no cambia. Un `year(fecha)` directo sí cambia con la zona de la sesión. |
+| **Año y trimestre se calculan comparando `fecha_contratacion` con instantes fijos escritos en UTC** (por ejemplo `TIMESTAMP'2021-04-01T00:00:00Z'`) | Una comparación entre instantes es exacta con cualquier zona horaria de la sesión. `year(fecha)` directo cambia con la zona de la sesión, y `convert_timezone` se descartó porque se equivoca en la hora que se repite al cambiar el horario de verano. Se comprobó corriendo las métricas con la sesión en UTC y en Bogotá, y en el warehouse: el resultado es idéntico. |
 | **Métrica 1: solo las combinaciones con al menos una contratación en 2021** | En el ejemplo del enunciado los ceros aparecen en trimestres, no en filas completas. Listar las 300 combinaciones posibles inventaría combinaciones que quizá no existen. |
 | **Métrica 2: el promedio divide el total de 2021 entre todos los departamentos, y "más que el promedio" es estrictamente mayor** | Es la lectura literal de "el promedio de todos los departamentos": los que no contrataron cuentan como 0. Se compara con enteros (`contratados × departamentos > total`) para no depender del redondeo. Con estos datos los 12 departamentos contrataron, así que dividir solo entre los que contrataron daría lo mismo. |
 | **Orden alfabético con la collation del español (`COLLATE ES`)** | El orden binario pone "Analista Financiero" antes que "Analista de Datos" y manda al final las palabras que empiezan con tilde. Con `ES`, las mayúsculas y las tildes solo desempatan, la ñ va después de la n y el orden siempre es el mismo. |
