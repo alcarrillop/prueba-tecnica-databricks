@@ -1,5 +1,6 @@
 # Job único del proyecto. Cada área agrega aquí su tarea con depends_on:
-#   ingesta  -> calidad (depends_on: ingesta) -> metricas (depends_on: calidad)
+#   ingesta -> calidad (depends_on: ingesta) -> metrica_1 y metrica_2 (depends_on: calidad)
+#   -> verificar_metricas (depends_on: metrica_1 y metrica_2)
 # DABs no permite repartir las tareas de un mismo job en varios archivos.
 #
 # Convenciones para las tareas que se agreguen:
@@ -57,3 +58,46 @@ resources:
             - task_key: ingesta
           notebook_task:
             notebook_path: ../src/calidad/cargar_plata.py
+
+        # Métricas (Sección 3): archivos SQL en el warehouse. `catalogo` y `esquema` llegan
+        # solos desde los parámetros del job (marcadores :catalogo y :esquema). `prefijo`
+        # es vacío aquí; las pruebas corren los mismos archivos con test_<sufijo>_.
+        - task_key: metrica_1
+          description: >-
+            Reconstruye oro_contratados_trimestre_2021 (contratados en 2021 por departamento,
+            cargo y trimestre, en UTC) y su vista _ordenada. Repetirla deja lo mismo.
+          depends_on:
+            - task_key: calidad
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../src/metricas/metrica_1.sql
+            parameters:
+              prefijo: ""
+
+        - task_key: metrica_2
+          description: >-
+            Reconstruye oro_departamentos_sobre_promedio_2021 (departamentos que contrataron
+            en 2021 estrictamente más que el promedio de todos) y su vista _ordenada.
+          depends_on:
+            - task_key: calidad
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../src/metricas/metrica_2.sql
+            parameters:
+              prefijo: ""
+
+        - task_key: verificar_metricas
+          description: >-
+            Falla si la suma de Q1 a Q4 no da el total de 2021, si hay empleados sin
+            departamento o cargo en plata, o si un cálculo alterno no coincide con las tablas.
+          depends_on:
+            - task_key: metrica_1
+            - task_key: metrica_2
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../src/metricas/verificar_metricas.sql
+            parameters:
+              prefijo: ""
