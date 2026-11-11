@@ -115,6 +115,19 @@ El pipeline corre como un solo job (`pipeline_talento`) con tres tareas en caden
 
 Las pruebas usan pytest con Databricks Connect sobre cómputo serverless, para probar el motor real (modo ANSI, collations, zona horaria). Las que necesitan tablas las crean en el mismo esquema con el prefijo `test_` y las borran al terminar.
 
+## Evidencia: la carga es incremental y se puede repetir
+
+Corridas reales del job en desarrollo. Cada "repetir" es una corrida sin archivos nuevos.
+
+| Momento | `bronce_departamentos` | `bronce_cargos` | `bronce_empleados` | Qué se comprobó |
+|---|---|---|---|---|
+| Llega el lote 1 | 12 filas (v1) | 25 (v1) | 1408 (v1) | El conteo es igual a las líneas de cada archivo, y el md5 de las líneas guardadas es igual al del archivo local |
+| Repetir | sin versión nueva | sin versión nueva | sin versión nueva | `EXCEPT ALL` contra v1 da 0 filas en los dos sentidos |
+| Llega el lote 2 | sin versión nueva | sin versión nueva | 2020 (v2, +612) | Solo se procesó el lote 2 (612 líneas). Las 1408 filas del lote 1 no cambiaron (`EXCEPT ALL` contra v1 da 0 y conservan su `_ingestado_en`). `cloud_files_state` lista los dos archivos |
+| Repetir | sin versión nueva | sin versión nueva | sin versión nueva | `EXCEPT ALL` contra v2 da 0 filas en los dos sentidos |
+
+Calidad y métricas se comprobaron igual sobre el lote 1: una segunda corrida no escribió nada en plata ni en cuarentena, y las tablas oro quedaron idénticas.
+
 ## Problemas encontrados en los datos
 
 Revisión hecha sobre los CSV de departamentos, cargos y el lote 1 de empleados (los números de línea cuentan desde 1).
@@ -134,7 +147,7 @@ Revisión hecha sobre los CSV de departamentos, cargos y el lote 1 de empleados 
 | Contrataciones en el borde de año o de trimestre | varias | id 1237 `2021-01-01T04:23:19Z` caería en 2020 en hora de Bogotá; id 1096 `2022-01-01T01:47:18Z` caería en 2021 | Las métricas calculan año y trimestre en UTC explícito |
 | Orden alfabético que distingue mayúsculas | 2 cargos | "Analista Financiero" ordenaría antes que "Analista de Datos" | Las métricas ordenan con la collation del español (`ES`) |
 
-Lo que se revisó y está bien: codificación UTF-8 válida y sin caracteres dañados, número de columnas correcto en todas las líneas, ids de departamentos y cargos en secuencia y sin nombres repetidos, y nombres de empleados sin caracteres raros. Hay muchos nombres repetidos con ids distintos (por ejemplo, 7 "Daniela López"), pero ninguno coincide además en fecha, departamento y cargo: son homónimos, no duplicados, y no se deduplica por nombre.
+Lo que se revisó y está bien: codificación UTF-8 válida y sin caracteres dañados, número de columnas correcto en todas las líneas (también en el lote 2, que además no usa comillas, lo que importa porque las líneas se parten con `split`), ids de departamentos y cargos en secuencia y sin nombres repetidos, y nombres de empleados sin caracteres raros. Hay muchos nombres repetidos con ids distintos (por ejemplo, 7 "Daniela López"), pero ninguno coincide además en fecha, departamento y cargo: son homónimos, no duplicados, y no se deduplica por nombre.
 
 ## Cómo se construyó
 
