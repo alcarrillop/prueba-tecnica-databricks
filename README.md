@@ -132,7 +132,9 @@ Calidad y métricas se comprobaron igual sobre el lote 1: una segunda corrida no
 
 ## Problemas encontrados en los datos
 
-Revisión hecha sobre los CSV de departamentos, cargos y el lote 1 de empleados (los números de línea cuentan desde 1).
+Los números de línea cuentan desde 1.
+
+### Departamentos, cargos y lote 1
 
 | Problema | Filas | Ejemplos | Qué se hizo |
 |---|---|---|---|
@@ -149,7 +151,27 @@ Revisión hecha sobre los CSV de departamentos, cargos y el lote 1 de empleados 
 | Contrataciones en el borde de año o de trimestre | varias | id 1237 `2021-01-01T04:23:19Z` caería en 2020 en hora de Bogotá; id 1096 `2022-01-01T01:47:18Z` caería en 2021 | Las métricas calculan año y trimestre en UTC explícito |
 | Orden alfabético que distingue mayúsculas | 2 cargos | "Analista Financiero" ordenaría antes que "Analista de Datos" | Las métricas ordenan con la collation del español (`ES`) |
 
-Lo que se revisó y está bien: codificación UTF-8 válida y sin caracteres dañados, número de columnas correcto en todas las líneas (también en el lote 2, que además no usa comillas, lo que importa porque las líneas se parten con `split`), ids de departamentos y cargos en secuencia y sin nombres repetidos, y nombres de empleados sin caracteres raros. Hay muchos nombres repetidos con ids distintos (por ejemplo, 7 "Daniela López"), pero ninguno coincide además en fecha, departamento y cargo: son homónimos, no duplicados, y no se deduplica por nombre.
+### Lote 2
+
+Revisión hecha sobre `empleados_contratados_lote2.csv` (612 líneas: 600 ids nuevos, 1401 a 2000, más 10 ids que ya venían en el lote 1 y 2 repetidos dentro del lote). Todo lo cubren las reglas ya definidas; no hizo falta ninguna regla nueva.
+
+| Problema | Filas | Ejemplos (línea del lote 2, id) | Qué se hizo |
+|---|---|---|---|
+| Copia exacta de una fila que ya estaba limpia desde el lote 1 | 8 | línea 426, id 1400 (igual a la línea 1408 del lote 1); también los ids 121, 366, 699, 884, 1070, 1081 y 1276 | Se conserva la del lote 1; la del lote 2 va a cuarentena (`ID_DUPLICADO_COPIA`). Contarlas sumaría 8 contrataciones de 2021 que no existen |
+| Mismo id que una fila limpia del lote 1, con otros datos | 2 ids | id 881: llega con fecha `2020-08-16` y departamento 2; en el lote 1 tenía `2020-10-31` y departamento 1. Igual el id 130 | Las cuatro versiones van a cuarentena (`ID_DUPLICADO_CONFLICTO`) y las dos del lote 1 se **retiran de plata**. Es la regla "el resultado no depende de cómo se partieron los lotes" aplicada con datos reales. Las cuatro son de 2020: no cambian las métricas |
+| Mismo id con datos distintos dentro del lote 2 | 2 ids, 4 filas | id 1749 en las líneas 354 y 355 (cambian fecha y departamento); id 1848 en las líneas 169 y 456 | Todas a cuarentena (`ID_DUPLICADO_CONFLICTO`) |
+| Fecha en otro formato | 2 | línea 128, id 1527: `07-27-2021` (mes-día-año); línea 416, id 1809: `2021/09/15 09:30:00` (sin zona horaria) | Cuarentena (`FECHA_FORMATO_INVALIDO`). El lote 1 traía `27/07/2021` (día/mes) y el lote 2 `07-27-2021` (mes-día): rescatarlas exigiría adivinar el orden del día y el mes, lo que confirma la decisión de no hacerlo |
+| `fecha_contratacion` vacía | 5 | línea 17, id 1417 | Cuarentena |
+| `id_cargo` vacío | 5 | línea 47, id 1447 | Cuarentena |
+| `nombre` vacío | 2 | línea 290, id 1687 | Cuarentena |
+| Departamento que no existe | 2 | línea 64, id 1464: departamento 99; línea 142, id 1541: departamento 15 | Cuarentena. Son los mismos códigos 15 y 99 del lote 1 |
+| Contrataciones en el borde de trimestre | 9 | id 1856 `2021-03-31T22:00:38Z`, id 1702 `2021-12-31T18:26:07Z` | Las métricas calculan en UTC |
+
+Las diferencias de los ids 881, 130, 1749 y 1848 podrían ser correcciones del sistema viejo, y en ese caso la regla sería "gana la última versión". Se descartó porque no hay forma de saberlo desde los datos, y las 8 copias idénticas apuntan más a un reenvío que a correcciones.
+
+### Lo que se revisó y está bien
+
+Codificación UTF-8 válida y sin caracteres dañados, número de columnas correcto en todas las líneas (también en el lote 2, que además no usa comillas, lo que importa porque las líneas se parten con `split`), ids de departamentos y cargos en secuencia y sin nombres repetidos, y nombres de empleados sin caracteres raros. Hay muchos nombres repetidos con ids distintos (por ejemplo, 7 "Daniela López"), pero ninguno coincide además en fecha, departamento y cargo: son homónimos, no duplicados, y no se deduplica por nombre.
 
 ## Cómo se construyó
 
