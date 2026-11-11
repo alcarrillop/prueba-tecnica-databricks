@@ -59,8 +59,21 @@ display(motivos_por_entidad(spark, tablas))
 # COMMAND ----------
 
 # D12: nombres repetidos con ids distintos en las dimensiones (solo aviso).
+avisos = {}
 for entidad, df in avisos_dimensiones(spark, tablas).items():
-    repetidos = df.collect()
-    print(f"{entidad}: {len(repetidos)} nombres repetidos con ids distintos")
-    for fila in repetidos:
-        print("  ", fila.asDict())
+    avisos[entidad] = [fila.asDict() for fila in df.collect()]
+    print(f"{entidad}: {len(avisos[entidad])} nombres repetidos con ids distintos")
+    for fila in avisos[entidad]:
+        print("  ", fila)
+
+# COMMAND ----------
+
+import json  # noqa: E402
+
+# Resumen visible en la salida de la tarea del job (escrituras de esta corrida y conciliación).
+dbutils.notebook.exit(
+    json.dumps(
+        {"escrituras": escrituras, "conciliacion": conciliacion, "nombres_repetidos": avisos},
+        ensure_ascii=False,
+    )
+)

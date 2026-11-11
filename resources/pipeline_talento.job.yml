@@ -38,7 +38,6 @@ resources:
 
       tags:
         proyecto: prueba_tecnica
-        aidevkit_project: ai-dev-kit
 
       tasks:
         - task_key: ingesta
@@ -47,3 +46,14 @@ resources:
             Solo procesa archivos nuevos; repetirla sin archivos nuevos no escribe nada.
           notebook_task:
             notebook_path: ../src/ingesta/cargar_bronce.py
+
+        - task_key: calidad
+          description: >-
+            Reglas de la Sección 2 sobre las filas bronce nuevas: las válidas a plata_<entidad>
+            y las demás a cuarentena con todos sus motivos. La unicidad del id se revisa
+            contra toda la historia. Repetirla sin filas nuevas no escribe nada. Falla si
+            alguna fila bronce queda sin destino o en plata y cuarentena a la vez.
+          depends_on:
+            - task_key: ingesta
+          notebook_task:
+            notebook_path: ../src/calidad/cargar_plata.py
