@@ -7,8 +7,10 @@ DataFrames. Así las pruebas ejercitan exactamente este código con datos hechos
 Flujo de `evaluar` (cada paso es una función con nombre propio):
   1. `guardar_valores_originales`: copia de los valores tal como llegaron (para cuarentena).
   2. `recortar_espacios`: CORRECCIÓN visible (D10), registrada en `_correcciones`.
-  3. `validar_estructura`: línea vacía o con columnas de más o de menos (D14).
+  3. `validar_estructura`: línea vacía, con columnas de más o de menos (contadas por
+     comas, igual que ingesta) o con comillas dobles (D14, D18).
   4. `validar_campos`: obligatorios y tipos (D1-D4); deja los valores tipados en `_t_<col>`.
+     No evalúa campos corridos ni campos con comillas (un motivo por causa).
   5. `validar_referencias`: departamento y cargo existen (solo empleados; D9).
   6. `marcar_duplicados`: unicidad del id dentro del conjunto evaluado (D6-D8).
   7. `combinar_motivos`: arreglo `motivos` con todos los motivos de la fila, en orden fijo.
@@ -42,8 +44,10 @@ ENTERO_MAXIMO = 2_147_483_647  # los ids se guardan como INT
 PATRON_FECHA = r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
 FORMATO_FECHA = "yyyy-MM-dd'T'HH:mm:ssX"
 FECHA_MINIMA = "1950-01-01T00:00:00Z"  # piso fijo de D4
-# Separa por comas que no estén dentro de comillas dobles (cuenta columnas de la línea).
-SEPARADOR_CSV = r',(?=(?:[^"]*"[^"]*")*[^"]*$)'
+# Las columnas se cuentan igual que las parte ingesta: por cada coma, sin interpretar
+# comillas (`split(linea, ',', -1)`). Las comillas tienen su propio motivo (D18).
+SEPARADOR = ","
+COMILLA = '"'
 
 
 @dataclass(frozen=True)
@@ -134,17 +138,42 @@ def recortar_espacios(df: DataFrame, columnas: tuple[str, ...] | list[str]) -> D
 
 # --- Paso 3 -----------------------------------------------------------------------------
 def validar_estructura(df: DataFrame, entidad: Entidad) -> DataFrame:
-    """D14: línea vacía o con un número de columnas distinto al del enunciado.
+    """D14 y D18: estructura de la línea cruda (`_linea_original`, que guarda ingesta).
 
-    Usa `_linea_original` (la línea cruda que guarda ingesta), porque al parsear el CSV
-    una columna de más se descarta y una de menos queda en NULL sin dejar rastro.
+    - `LINEA_VACIA`: la línea no tiene nada.
+    - `COLUMNAS_INVALIDAS`: partida por comas como lo hace ingesta (sin interpretar
+      comillas), no da el número de columnas del enunciado. Al partir, una columna de más
+      se descarta y una de menos queda vacía sin dejar rastro en los campos.
+    - `COMILLAS_NO_SOPORTADAS`: la línea (o algún campo) trae una comilla doble.
+
+    Deja `_columnas_invalidas` para que los pasos siguientes no evalúen campos corridos.
     """
     linea = F.col(LINEA_ORIGINAL)
     vacia = linea.isNotNull() & (quitar_espacios_borde(linea) == "")
-    n_columnas = F.size(F.split(linea, SEPARADOR_CSV, -1))
-    invalida = linea.isNotNull() & ~vacia & (n_columnas != len(entidad.columnas))
-    return df.withColumn("_linea_vacia", F.coalesce(vacia, F.lit(False))).withColumn(
-        "_m_estructura", _compactar(F.when(invalida, F.lit(M.COLUMNAS_INVALIDAS)))
+    n_columnas = F.size(F.split(linea, SEPARADOR, -1))
+    columnas_invalidas = linea.isNotNull() & ~vacia & (n_columnas != len(entidad.columnas))
+    comillas = F.coalesce(linea.contains(COMILLA), F.lit(False))
+    for c in entidad.columnas:
+        comillas = comillas | F.coalesce(F.col(c).contains(COMILLA), F.lit(False))
+    return (
+        df.withColumn("_linea_vacia", F.coalesce(vacia, F.lit(False)))
+        .withColumn("_columnas_invalidas", F.coalesce(columnas_invalidas, F.lit(False)))
+        .withColumn(
+            "_m_estructura",
+            _compactar(
+                F.when(F.col("_columnas_invalidas"), F.lit(M.COLUMNAS_INVALIDAS)),
+                F.when(comillas, F.lit(M.COMILLAS_NO_SOPORTADAS)),
+            ),
+        )
+    )
+
+
+def _campo_evaluable(columna: str) -> Column:
+    """Un motivo por causa (D5, D18): no se evalúa un campo cuyo error sería consecuencia
+    de la estructura. Con columnas de más o de menos los campos están corridos y no se
+    sabe qué columna falta o sobra; un campo con comillas ya tiene su motivo."""
+    return ~F.col("_columnas_invalidas") & ~F.coalesce(
+        F.col(columna).contains(COMILLA), F.lit(False)
     )
 
 
@@ -159,21 +188,24 @@ def validar_campos(df: DataFrame, entidad: Entidad) -> DataFrame:
       con la forma pero imposible en el calendario -> `FECHA_INEXISTENTE` (se parsea
       estricto, sin "acomodar" 2021-02-30 a marzo).
     - Rango (D4): posterior a su `_ingestado_en` o anterior a 1950 -> `FECHA_FUERA_DE_RANGO`.
+
+    Los valores se tipan siempre (el id tipado se usa para la unicidad), pero los motivos
+    de un campo solo se agregan si el campo es evaluable (`_campo_evaluable`, D18).
     """
     motivos_por_columna = []
     for c in entidad.columnas:
         v = F.col(c)
         vacio = v.isNull() | (v == "")
         tipo = entidad.tipo_de(c)
-        motivos_por_columna.append(F.when(vacio, F.lit(M.campo_vacio(c))))
+        motivos_columna = [F.when(vacio, F.lit(M.campo_vacio(c)))]
 
         if tipo == "entero":
             forma = v.rlike(PATRON_ENTERO)
             numero = v.try_cast("decimal(38,0)")
             en_rango = F.coalesce(numero.between(1, ENTERO_MAXIMO), F.lit(False))
             df = df.withColumn(_t(c), F.when(~vacio & forma & en_rango, numero.cast("int")))
-            motivos_por_columna.append(F.when(~vacio & ~forma, F.lit(M.tipo_invalido(c))))
-            motivos_por_columna.append(
+            motivos_columna.append(F.when(~vacio & ~forma, F.lit(M.tipo_invalido(c))))
+            motivos_columna.append(
                 F.when(~vacio & forma & ~en_rango, F.lit(M.valor_fuera_de_rango(c)))
             )
         elif tipo == "fecha":
@@ -184,13 +216,16 @@ def validar_campos(df: DataFrame, entidad: Entidad) -> DataFrame:
             ts = F.col(_t(c))
             minima = F.try_to_timestamp(F.lit(FECHA_MINIMA), F.lit(FORMATO_FECHA))
             fuera = ts.isNotNull() & ((ts < minima) | (ts > F.col(INGESTADO)))
-            motivos_por_columna.append(F.when(~vacio & ~forma, F.lit(M.FECHA_FORMATO_INVALIDO)))
-            motivos_por_columna.append(
+            motivos_columna.append(F.when(~vacio & ~forma, F.lit(M.FECHA_FORMATO_INVALIDO)))
+            motivos_columna.append(
                 F.when(~vacio & forma & ts.isNull(), F.lit(M.FECHA_INEXISTENTE))
             )
-            motivos_por_columna.append(F.when(fuera, F.lit(M.FECHA_FUERA_DE_RANGO)))
+            motivos_columna.append(F.when(fuera, F.lit(M.FECHA_FUERA_DE_RANGO)))
         else:
             df = df.withColumn(_t(c), F.when(~vacio, v))
+
+        evaluable = _campo_evaluable(c)
+        motivos_por_columna.extend(F.when(evaluable, m) for m in motivos_columna)
 
     return df.withColumn("_m_campos", _compactar(*motivos_por_columna))
 
@@ -209,8 +244,12 @@ def validar_referencias(
     cargos = ids_cargos.select(F.col("id").alias("_ref_cargo")).distinct()
     df = df.join(deps, F.col(_t("id_departamento")) == F.col("_ref_departamento"), "left")
     df = df.join(cargos, F.col(_t("id_cargo")) == F.col("_ref_cargo"), "left")
-    falta_dep = F.col(_t("id_departamento")).isNotNull() & F.col("_ref_departamento").isNull()
-    falta_cargo = F.col(_t("id_cargo")).isNotNull() & F.col("_ref_cargo").isNull()
+    # Con columnas corridas (D18) los valores no son confiables: no se busca la referencia.
+    alineada = ~F.col("_columnas_invalidas")
+    falta_dep = (
+        alineada & F.col(_t("id_departamento")).isNotNull() & F.col("_ref_departamento").isNull()
+    )
+    falta_cargo = alineada & F.col(_t("id_cargo")).isNotNull() & F.col("_ref_cargo").isNull()
     return df.withColumn(
         "_m_referencias",
         _compactar(
@@ -277,8 +316,12 @@ def marcar_duplicados(df: DataFrame, entidad: Entidad) -> DataFrame:
 # --- Paso 7 -----------------------------------------------------------------------------
 def combinar_motivos(df: DataFrame) -> DataFrame:
     """Todos los motivos de la fila, en orden fijo: estructura, campos (en el orden de las
-    columnas), referencias y unicidad. Una línea vacía lleva solo `LINEA_VACIA`: los
-    `CAMPO_VACIO` de todas sus columnas no agregarían información."""
+    columnas), referencias y unicidad. Un motivo por causa:
+      - una línea vacía lleva solo `LINEA_VACIA`;
+      - con `COLUMNAS_INVALIDAS` no hay motivos de campos ni de referencias (están corridos);
+      - un campo con comillas no suma motivos propios: ya cuenta `COMILLAS_NO_SOPORTADAS`.
+    `COLUMNAS_INVALIDAS` y `COMILLAS_NO_SOPORTADAS` pueden ir juntos: son dos hechos
+    distintos de la línea (no tiene 5 campos; trae comillas)."""
     referencias = F.col("_m_referencias") if "_m_referencias" in df.columns else _arreglo_vacio()
     todos = F.concat(
         F.col("_m_estructura"), F.col("_m_campos"), referencias, F.col("_m_duplicados")
@@ -306,7 +349,10 @@ def evaluar(
         df = validar_referencias(df, ids_departamentos, ids_cargos)
     df = marcar_duplicados(df, entidad)
     df = combinar_motivos(df)
-    return df.drop("_m_estructura", "_m_campos", "_m_referencias", "_m_duplicados", "_linea_vacia")
+    return df.drop(
+        "_m_estructura", "_m_campos", "_m_referencias", "_m_duplicados", "_linea_vacia",
+        "_columnas_invalidas",
+    )
 
 
 # --- Proyección a las tablas de destino --------------------------------------------------

@@ -19,7 +19,9 @@ dev = [
 package = false
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+# src/ingesta no es un paquete (su notebook importa `bronce` como módulo vecino); las
+# pruebas de calidad lo importan igual para partir líneas exactamente como ingesta.
+pythonpath = ["src", "src/ingesta"]
 testpaths = ["tests"]
 addopts = "-ra -p no:cacheprovider"
 markers = [

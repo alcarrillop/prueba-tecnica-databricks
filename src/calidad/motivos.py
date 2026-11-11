@@ -6,7 +6,10 @@ la cuarentena dependen de ellos. Los que llevan columna usan el formato `CODIGO:
 
 # --- Estructura de la línea cruda (D14) ------------------------------------------------
 LINEA_VACIA = "LINEA_VACIA"  # la línea no tiene nada (o solo espacios)
-COLUMNAS_INVALIDAS = "COLUMNAS_INVALIDAS"  # la línea no tiene el número de columnas esperado
+COLUMNAS_INVALIDAS = "COLUMNAS_INVALIDAS"  # partida por comas, no da el número de columnas esperado
+# Algún campo trae una comilla doble. El formato del enunciado no usa comillas e ingesta
+# parte por comas sin interpretarlas: un valor entrecomillado no es confiable.
+COMILLAS_NO_SOPORTADAS = "COMILLAS_NO_SOPORTADAS"
 
 # --- Regla 1: todos los campos son obligatorios (D1, D2, D3, D4) -----------------------
 FECHA_FORMATO_INVALIDO = "FECHA_FORMATO_INVALIDO"  # no es AAAA-MM-DDTHH:MM:SSZ

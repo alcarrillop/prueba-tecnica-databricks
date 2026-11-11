@@ -9,7 +9,18 @@ from pyspark.sql import functions as F
 
 from calidad import motivos as M
 from calidad.reglas import CARGOS, DEPARTAMENTOS, EMPLEADOS, evaluar, nombres_repetidos
-from fabricas import INGESTA_1, INGESTA_2, VALIDA, bronce, fila, ids, micros_utc, motivos_por_linea
+from bronce import partir_en_lineas  # código real de ingesta (src/ingesta/bronce.py)
+from fabricas import (
+    INGESTA_1,
+    INGESTA_2,
+    LOTE_1,
+    VALIDA,
+    bronce,
+    fila,
+    ids,
+    micros_utc,
+    motivos_por_linea,
+)
 
 
 def evaluar_empleados(spark, filas, **kwargs):
@@ -229,16 +240,58 @@ def test_lineas_vacias_o_con_columnas_de_mas_o_de_menos(spark):
              original="51,Ana Pérez,2021-07-27T16:02:08Z,1"),
         fila(None, None, None, None, None, original=""),
         fila(None, None, None, None, None, original="   "),
-        fila("52", "Pérez, Ana", "2021-07-27T16:02:08Z", "1", "1",
-             original='52,"Pérez, Ana",2021-07-27T16:02:08Z,1,1'),
     ]
     assert motivos_por_linea(evaluar_empleados(spark, filas)) == {
         1: [M.COLUMNAS_INVALIDAS],
-        2: [M.COLUMNAS_INVALIDAS, M.campo_vacio("id_cargo")],
+        # Falta una columna, pero no se sabe cuál: no se adivina un CAMPO_VACIO:id_cargo.
+        2: [M.COLUMNAS_INVALIDAS],
         3: [M.LINEA_VACIA],
         4: [M.LINEA_VACIA],
-        5: [],
     }
+
+
+# --- Comillas (D18): las líneas se parten con el código real de ingesta --------------------
+def bronce_como_ingesta(spark, entidad, texto):
+    """Filas bronce de un archivo con `texto`, partidas por `partir_en_lineas` de ingesta
+    (split por comas, sin interpretar comillas)."""
+    archivos = spark.createDataFrame([(texto, LOTE_1)], "value STRING, _archivo_origen STRING")
+    archivos = archivos.withColumn("_archivo_modificado_en", F.current_timestamp())
+    return partir_en_lineas(archivos, list(entidad.columnas))
+
+
+def test_comillas_con_coma_adentro_dan_columnas_de_mas(spark):
+    texto = '52,"Pérez, Ana",2021-07-27T16:02:08Z,1,1\r\n'
+    filas = bronce_como_ingesta(spark, EMPLEADOS, texto)
+    # Así la deja ingesta: la coma dentro de las comillas parte el nombre en dos campos.
+    r = filas.first()
+    assert (r["nombre"], r["fecha_contratacion"], r["id_departamento"]) == (
+        '"Pérez', ' Ana"', "2021-07-27T16:02:08Z"
+    )
+    df = evaluar(filas, EMPLEADOS, ids(spark, [1, 2, 3]), ids(spark, [1, 2]))
+    # Dos hechos de la línea; sin motivos por los campos corridos (fecha ' Ana"',
+    # departamento '2021-07-27...'), que serían consecuencia de lo mismo.
+    assert motivos_por_linea(df) == {1: [M.COLUMNAS_INVALIDAS, M.COMILLAS_NO_SOPORTADAS]}
+
+
+def test_comillas_sin_coma_no_llegan_a_plata(spark):
+    texto = (
+        '53,"Ana Pérez",2021-07-27T16:02:08Z,1,1\r\n'  # sin la regla, iría a plata con comillas
+        '"54",Luis Gómez,2021-07-27T16:02:08Z,1,1\r\n'  # id con comillas: sin TIPO_INVALIDO:id
+        '55,"Sara Vélez",,1,99\r\n'  # las otras causas sí se reportan
+        '56,Eva Mora,2021-07-27T16:02:08Z,1,1\r\n'  # control: válida
+    )
+    df = evaluar(
+        bronce_como_ingesta(spark, EMPLEADOS, texto), EMPLEADOS, ids(spark, [1, 2, 3]), ids(spark, [1, 2])
+    )
+    assert motivos_por_linea(df) == {
+        1: [M.COMILLAS_NO_SOPORTADAS],
+        2: [M.COMILLAS_NO_SOPORTADAS],
+        3: [M.COMILLAS_NO_SOPORTADAS, M.campo_vacio("fecha_contratacion"), M.CARGO_NO_EXISTE],
+        4: [],
+    }
+    # También en las dimensiones.
+    cargos = evaluar(bronce_como_ingesta(spark, CARGOS, '7,"Abogado"\r\n8,Auditor\r\n'), CARGOS)
+    assert motivos_por_linea(cargos) == {1: [M.COMILLAS_NO_SOPORTADAS], 2: []}
 
 
 # --- Regla 3: unicidad dentro de un lote (D6, D7) ---------------------------------------
