@@ -93,6 +93,22 @@ El pipeline corre como un solo job (`pipeline_talento`) con tres tareas en caden
 | **`fecha_contratacion` se guarda como TIMESTAMP y las métricas calculan año y trimestre en UTC** | Las fechas vienen en UTC. Calcular en la zona horaria de la sesión movería contrataciones de año o de trimestre. |
 | **Reprocesar la cuarentena cuando lleguen correcciones queda fuera de alcance** | Se documenta como siguiente paso. |
 
+### Métricas
+
+| Decisión | Por qué |
+|---|---|
+| **Se calculan sobre las tablas plata, nunca sobre bronce** | Las filas en cuarentena no deben contar. |
+| **Dos tablas con las columnas exactas del enunciado (`oro_contratados_trimestre_2021` y `oro_departamentos_sobre_promedio_2021`), más una vista `_ordenada` de cada una** | Una tabla Delta no garantiza el orden de las filas al leerla. La vista trae el `ORDER BY` oficial, así que nadie tiene que recordar la collation ni el desempate. |
+| **Se recalculan completas en cada corrida (`CREATE OR REPLACE TABLE ... AS SELECT`)** | Calidad puede retirar filas de plata cuando llega un lote nuevo, así que un cálculo incremental quedaría desactualizado. Los datos son pocos y el reemplazo es atómico. No usan la hora actual ni nada aleatorio: repetir da el mismo resultado. |
+| **Año y trimestre salen de `convert_timezone('UTC', fecha_contratacion)`** | Probado con la sesión en UTC, Bogotá, Tokio y Nueva York: el resultado no cambia. Un `year(fecha)` directo sí cambia con la zona de la sesión. |
+| **Métrica 1: solo las combinaciones con al menos una contratación en 2021** | En el ejemplo del enunciado los ceros aparecen en trimestres, no en filas completas. Listar las 300 combinaciones posibles inventaría combinaciones que quizá no existen. |
+| **Métrica 2: el promedio divide el total de 2021 entre todos los departamentos, y "más que el promedio" es estrictamente mayor** | Es la lectura literal de "el promedio de todos los departamentos": los que no contrataron cuentan como 0. Se compara con enteros (`contratados × departamentos > total`) para no depender del redondeo. Con estos datos los 12 departamentos contrataron, así que dividir solo entre los que contrataron daría lo mismo. |
+| **Orden alfabético con la collation del español (`COLLATE ES`)** | El orden binario pone "Analista Financiero" antes que "Analista de Datos" y manda al final las palabras que empiezan con tilde. Con `ES`, las mayúsculas y las tildes solo desempatan, la ñ va después de la n y el orden siempre es el mismo. |
+| **Desempate de la Métrica 2: contratados de mayor a menor, luego nombre del departamento, luego id** | Garantiza un orden único y coherente con el de la Métrica 1. |
+| **El `id` de la Métrica 2 es el id del departamento** | Es lo que pide el enunciado. Los ids del ejemplo del enunciado son ilustrativos. |
+| **Las métricas corren como tareas SQL en el warehouse** | La sección pide SQL: el repo y el job muestran SQL puro. Las consultas reciben catálogo, esquema y un prefijo de tabla como parámetros, así que las pruebas las corren sobre tablas pequeñas hechas a mano. |
+| **Una tarea de verificación dentro del job** | Hace fallar el job si la suma de los trimestres no cuadra con plata, si algún empleado se pierde en un cruce o si un segundo cálculo, escrito de otra forma, no coincide. Corre después de reemplazar las tablas: si falla, las tablas ya cambiaron, pero el job queda en error. |
+
 ### Pruebas
 
 Las pruebas usan pytest con Databricks Connect sobre cómputo serverless, para probar el motor real (modo ANSI, collations, zona horaria). Las que necesitan tablas las crean en el mismo esquema con el prefijo `test_` y las borran al terminar.
@@ -113,8 +129,8 @@ Revisión hecha sobre los CSV de departamentos, cargos y el lote 1 de empleados 
 | Filas repetidas exactas | 7 ids | id 313 en las líneas 315 y 453 | Se conserva una; la copia va a cuarentena |
 | Mismo id con datos distintos | 1 id, 2 filas | id 765: cambia fecha y departamento | Las dos versiones a cuarentena |
 | Finales de línea Windows (`\r\n`) | todas | los tres archivos | Se verifica que ningún valor conserve el `\r` |
-| Contrataciones en el borde de año o de trimestre | 6 | id 1237 `2021-01-01T04:23:19Z` | Las métricas calculan en UTC; en la zona horaria de Bogotá esta fila caería en 2020 |
-| Orden alfabético que distingue mayúsculas | 2 cargos | "Analista Financiero" ordenaría antes que "Analista de Datos" | Las métricas ordenan sin distinguir mayúsculas ni tildes |
+| Contrataciones en el borde de año o de trimestre | varias | id 1237 `2021-01-01T04:23:19Z` caería en 2020 en hora de Bogotá; id 1096 `2022-01-01T01:47:18Z` caería en 2021 | Las métricas calculan año y trimestre en UTC explícito |
+| Orden alfabético que distingue mayúsculas | 2 cargos | "Analista Financiero" ordenaría antes que "Analista de Datos" | Las métricas ordenan con la collation del español (`ES`) |
 
 Lo que se revisó y está bien: codificación UTF-8 válida y sin caracteres dañados, número de columnas correcto en todas las líneas, ids de departamentos y cargos en secuencia y sin nombres repetidos, y nombres de empleados sin caracteres raros. Hay muchos nombres repetidos con ids distintos (por ejemplo, 7 "Daniela López"), pero ninguno coincide además en fecha, departamento y cargo: son homónimos, no duplicados, y no se deduplica por nombre.
 
