@@ -1,0 +1,27 @@
+[project]
+name = "prueba-tecnica-talento"
+version = "0.1.0"
+description = "Pipeline de talento humano en Databricks: ingesta, calidad y métricas."
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[dependency-groups]
+# Entorno local de desarrollo y pruebas. El código corre en Databricks serverless
+# a través de Databricks Connect; no se instala pyspark suelto (choca con databricks-connect).
+dev = [
+    "databricks-connect>=17.0,<18.0",
+    "pytest>=8.0",
+]
+
+[tool.uv]
+# El proyecto no se empaqueta: el código de src/ se importa desde los notebooks
+# y desde las pruebas (pythonpath de pytest).
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-ra -p no:cacheprovider"
+markers = [
+    "tablas: la prueba crea tablas Delta temporales test_* en el esquema del proyecto",
+]
