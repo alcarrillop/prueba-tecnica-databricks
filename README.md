@@ -30,9 +30,11 @@ Pruebas automáticas (corren contra Databricks serverless con Databricks Connect
 
 ```bash
 uv sync
-uv run pytest                   # suite completa (unos 20 minutos): crea y borra tablas test_* en el esquema
-uv run pytest -m "not tablas"   # solo las pruebas sobre DataFrames en memoria
+uv run pytest                   # suite completa: 51 pruebas, unos 25 minutos; crea y borra tablas test_* en el esquema
+uv run pytest -m "not tablas"   # solo las pruebas sobre DataFrames en memoria, unos 3 minutos
 ```
+
+Usan el perfil `DEFAULT` (se cambia con `DATABRICKS_CONFIG_PROFILE`). Cubren cada regla de calidad, la carga incremental entre lotes (copias, conflictos con retirada de filas de plata, corridas repetidas e interrumpidas) y las dos métricas: bordes de trimestre en UTC con la sesión en Bogotá y Nueva York, el promedio que cuenta los departamentos sin contrataciones, la comparación estricta, el orden en español y el recorrido completo bronce → plata → oro.
 
 ## Arquitectura
 

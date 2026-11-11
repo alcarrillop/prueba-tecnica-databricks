@@ -7,6 +7,7 @@ Contrato de ingesta: columnas de datos en STRING, más `_archivo_origen`,
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 
 from pyspark.sql import DataFrame, SparkSession
@@ -14,6 +15,9 @@ from pyspark.sql import DataFrame, SparkSession
 from calidad.reglas import Entidad
 
 UTC = timezone.utc
+# Dónde crean sus tablas temporales (test_<sufijo>_*) las pruebas marcadas `tablas`.
+CATALOGO = os.environ.get("CALIDAD_PRUEBAS_CATALOGO", "workspace")
+ESQUEMA = os.environ.get("CALIDAD_PRUEBAS_ESQUEMA", "prueba_tecnica")
 INGESTA_1 = datetime(2026, 11, 1, 6, 0, 0, tzinfo=UTC)
 INGESTA_2 = datetime(2026, 11, 5, 6, 0, 0, tzinfo=UTC)
 LANDING = "/Volumes/workspace/prueba_tecnica/landing"

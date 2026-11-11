@@ -7,9 +7,6 @@ Cada prueba crea sus propias tablas en el esquema del proyecto con el prefijo
 Marcadas como `tablas`: `uv run pytest -m "not tablas"` corre solo las de memoria.
 """
 
-import os
-import uuid
-
 import pytest
 from pyspark.sql import types as T
 
@@ -26,6 +23,8 @@ from calidad.incremental import (
 )
 from calidad.reglas import CARGOS, DEPARTAMENTOS, EMPLEADOS, ENTIDADES
 from fabricas import (
+    CATALOGO,
+    ESQUEMA,
     INGESTA_1,
     INGESTA_2,
     LANDING,
@@ -37,9 +36,6 @@ from fabricas import (
 )
 
 pytestmark = pytest.mark.tablas
-
-CATALOGO = os.environ.get("CALIDAD_PRUEBAS_CATALOGO", "workspace")
-ESQUEMA = os.environ.get("CALIDAD_PRUEBAS_ESQUEMA", "prueba_tecnica")
 
 DEPARTAMENTOS_CSV = [("1", "Ventas"), ("2", "  Talento Humano"), ("3", "Tecnología ")]
 CARGOS_CSV = [("1", "Gerente"), ("2", "Analista de Datos")]
@@ -75,24 +71,17 @@ FILAS_LOTE_2 = [
 
 
 @pytest.fixture
-def nuevas_tablas(spark):
-    """Fábrica de juegos de tablas temporales; borra al final solo lo que creó."""
-    creadas = []
+def nuevas_tablas(spark, prefijo_temporal):
+    """Fábrica de juegos de tablas temporales (bronce vacías); la limpieza la hace
+    `prefijo_temporal`, que borra solo lo que tenga su prefijo único."""
 
     def crear():
-        tablas = Tablas(CATALOGO, ESQUEMA, f"test_{uuid.uuid4().hex[:10]}_")
-        creadas.append(tablas)
+        tablas = Tablas(CATALOGO, ESQUEMA, prefijo_temporal())
         for entidad in ENTIDADES.values():
             spark.sql(f"CREATE TABLE {tablas.bronce(entidad)} ({esquema_bronce(entidad)})")
         return tablas
 
-    yield crear
-    for tablas in creadas:
-        nombres = [tablas.cuarentena]
-        for entidad in ENTIDADES.values():
-            nombres += [tablas.bronce(entidad), tablas.plata(entidad)]
-        for nombre in nombres:
-            spark.sql(f"DROP TABLE IF EXISTS {nombre}")
+    return crear
 
 
 def agregar_bronce(spark, tablas, entidad, filas, archivo, ingestado):
