@@ -2,7 +2,35 @@
 
 Solución a la prueba técnica de ingeniero de datos descrita en [enunciado.md](enunciado.md): recibir los CSV del sistema viejo, dejarlos en tablas confiables y responder las dos preguntas de talento humano.
 
-> Este README se va completando por fases. La sección **Cómo correrlo** se agrega cuando el pipeline esté construido, y los problemas del lote 2 cuando llegue ese lote.
+> Este README se va completando por fases: las métricas y los problemas del lote 2 se agregan cuando estén listos.
+
+## Cómo correrlo
+
+Requisitos: [Databricks CLI](https://docs.databricks.com/dev-tools/cli/) con un perfil autenticado (aquí `DEFAULT`) y, para las pruebas, [uv](https://docs.astral.sh/uv/).
+
+```bash
+# 1. Validar y desplegar el bundle en desarrollo
+databricks bundle validate -t dev --profile DEFAULT
+databricks bundle deploy   -t dev --profile DEFAULT
+
+# 2. Subir los archivos que "llegan" (crea el esquema y el Volume si no existen; nunca sobrescribe)
+scripts/subir_archivos.sh --profile DEFAULT datos/departamentos.csv datos/cargos.csv datos/empleados_contratados_lote1.csv
+
+# 3. Correr el pipeline
+databricks bundle run pipeline_talento -t dev --profile DEFAULT
+
+# 4. Cuando llega el lote 2: subirlo y volver a correr
+scripts/subir_archivos.sh --profile DEFAULT datos/empleados_contratados_lote2.csv
+databricks bundle run pipeline_talento -t dev --profile DEFAULT
+```
+
+Para comprobar que la carga se puede repetir, basta con correr el paso 3 otra vez sin archivos nuevos: `DESCRIBE HISTORY` de las tablas no muestra versiones nuevas.
+
+Pruebas automáticas (corren contra Databricks serverless con Databricks Connect):
+
+```bash
+uv run pytest
+```
 
 ## Arquitectura
 
@@ -35,6 +63,10 @@ El pipeline corre como un solo job (`pipeline_talento`) con tres tareas en caden
 |---|---|
 | **Auto Loader con checkpoint y `trigger(availableNow=True)`** | El checkpoint recuerda qué archivos ya se procesaron: cuando llega el lote 2 solo se lee el lote 2 (incremental), y una corrida sin archivos nuevos no escribe nada (idempotente). Se descartó `COPY INTO` porque partir cada archivo en líneas numeradas no es natural ahí, y Lakeflow Declarative Pipelines porque ataría todas las tablas a un mismo pipeline. |
 | **Cada archivo se lee como texto y se guarda el número de línea y la línea original** | El lector CSV estándar no da número de línea, se salta las líneas vacías y descarta en silencio las columnas de más. La cuarentena necesita decir de qué archivo y línea viene cada fila rechazada. |
+| **Cada línea se parte por comas (`split(linea, ',', -1)`), no con un parser CSV** | Con `from_csv`, un campo vacío y uno que falta quedan los dos en NULL, y las columnas de más se pierden sin aviso. Con `split`, un campo vacío queda como texto vacío, uno que falta queda en NULL y lo que sobra sigue en la línea original. A cambio, las comillas no se interpretan: un valor entre comillas con una coma adentro produciría columnas de más y la fila iría a cuarentena, no se perdería. Los archivos recibidos no usan comillas. |
+| **De cada línea solo se quita el terminador (`\r\n` o `\n`)** | Los archivos vienen con finales de línea Windows. Se comprobó que ningún valor conserva el `\r`. Una línea vacía en medio del archivo sí se guarda, para que calidad la vea. |
+| **Columnas de trazabilidad en cada fila cruda** | `_archivo_origen` y `_numero_linea` identifican la fila; `_linea_original` es el texto exacto; `_archivo_modificado_en` es la hora de subida al Volume (no la de exportación del sistema viejo); `_ingestado_en` es el momento de la corrida. |
+| **Cada archivo se lee entero en memoria** (`wholetext`) | Es lo que permite numerar las líneas. Sirve para archivos de KB o MB como estos; para archivos de GB habría que cambiar de lector. |
 | **Todas las columnas de la capa bronce son texto** | Ningún valor se pierde al convertir tipos. Un valor inválido llega intacto a calidad, que decide qué hacer con él y deja el motivo. |
 | **Las tablas bronce solo admiten agregar filas** (`delta.appendOnly`) | Son el registro fiel de lo que llegó. Nada se reescribe ni se borra. |
 | **El esquema y los Volumes los crea el código (`IF NOT EXISTS`), no el bundle** | Si alguien destruye el bundle, los datos y los checkpoints no se borran con él. |
