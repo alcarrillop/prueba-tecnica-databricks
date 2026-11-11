@@ -58,7 +58,7 @@ scripts/subir_archivos.sh --profile DEFAULT datos/empleados_contratados_lote2.cs
 databricks bundle run pipeline_talento -t dev --profile DEFAULT
 ```
 
-Para comprobar que la carga se puede repetir, basta con correr el paso 3 otra vez sin archivos nuevos: `DESCRIBE HISTORY` de las tablas no muestra versiones nuevas.
+Para comprobar que la carga se puede repetir, basta con correr el paso 3 otra vez sin archivos nuevos: `DESCRIBE HISTORY` de las tablas bronce, plata y cuarentena no muestra versiones nuevas. Las tablas oro se reconstruyen completas en cada corrida, así que sí crean una versión nueva, pero con el mismo contenido (`EXCEPT ALL` contra la versión anterior da 0 filas).
 
 Pruebas automáticas (corren contra Databricks serverless con Databricks Connect):
 
@@ -109,7 +109,7 @@ El pipeline corre como un solo job (`pipeline_talento`) con tres tareas en caden
 | **Las tablas bronce solo admiten agregar filas** (`delta.appendOnly`) | Son el registro fiel de lo que llegó. Nada se reescribe ni se borra. |
 | **El esquema y los Volumes los crea el código (`IF NOT EXISTS`), no el bundle** | Si alguien destruye el bundle, los datos y los checkpoints no se borran con él. |
 | **La subida al Volume la hace un script local que solo sube los archivos que se le indican** | Así se simula que el lote 2 llega días después. Si llega un archivo con el mismo nombre pero otro contenido, no se sobrescribe: el script termina con error. Si llega el mismo contenido con otro nombre, se carga, y calidad marca los ids repetidos. |
-| **Un solo esquema para dev y prod** | La prueba usa un único esquema. Producción queda definida en el bundle pero no se despliega; apuntarla a otro esquema es cambiar una línea. |
+| **Un solo esquema para dev y prod** | La prueba usa un único esquema. Producción queda definida en el bundle pero no se despliega; apuntarla a otro esquema es cambiar una línea. Al compartir esquema, dev y prod también comparten los checkpoints. Si se desplegara prod aquí, habría dos jobs sobre el mismo checkpoint, y `max_concurrent_runs: 1` solo impide corridas simultáneas dentro de un mismo job. Por eso **prod no se debe desplegar en este esquema**: en un caso real se apunta a su propio esquema o catálogo en `databricks.yml`. |
 | **Cómputo serverless en modo estándar** | Es un proceso por lotes sin plazo estricto; el modo estándar es el más económico. |
 | **Job programado a diario a las 06:00 UTC** | Queda pausado en desarrollo y activo en producción. |
 
@@ -123,7 +123,7 @@ El pipeline corre como un solo job (`pipeline_talento`) con tres tareas en caden
 | **Fechas futuras o anteriores a 1950 van a cuarentena** | No son fechas de contratación plausibles. |
 | **Se guardan todos los motivos de rechazo de una fila**, uno por causa | Quien revise la cuarentena ve todo lo que hay que corregir de una vez. |
 | **Departamento y cargo se validan contra las tablas plata** | Un empleado no puede apuntar a un departamento que a su vez fue rechazado. |
-| **Filas repetidas exactas: se conserva la primera (por archivo y línea) y las demás van a cuarentena** | Son la misma contratación. Mandarlas todas a cuarentena perdería contrataciones reales; conservarlas todas las contaría dos veces. |
+| **Filas repetidas exactas: se conserva la primera que se cargó (por `_ingestado_en`; si llegaron en la misma corrida, la de menor archivo y línea) y las demás van a cuarentena** | Son la misma contratación. Mandarlas todas a cuarentena perdería contrataciones reales; conservarlas todas las contaría dos veces. Conservar la primera que se cargó hace que una fila que ya está en plata nunca se reemplace cuando llega un lote nuevo. Como las copias son idénticas, lo único que cambiaría con otra regla es el archivo y la línea de origen registrados. |
 | **Mismo id con datos distintos: todas las versiones van a cuarentena** | No hay forma de saber cuál es la verdadera. |
 | **El resultado no depende de cómo se partieron los lotes** | Procesar el lote 1 y luego el 2 da lo mismo que procesarlos juntos. Si el lote 2 trae otra versión de un id que ya estaba limpio, las dos van a cuarentena (la del lote 1 se retira de plata), y por eso las métricas pueden cambiar hacia atrás. |
 | **Espacios sobrantes en los bordes de los textos se quitan**, en un paso propio que registra qué fila tocó (`_correcciones`) | Sin esto, " Servicio al Cliente  " ordena antes que "Cadena de Suministro". El valor original sigue en la capa bronce. |
