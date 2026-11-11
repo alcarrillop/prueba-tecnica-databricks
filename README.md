@@ -128,7 +128,30 @@ Corridas reales del job en desarrollo. Cada "repetir" es una corrida sin archivo
 | Llega el lote 2 | sin versión nueva | sin versión nueva | 2020 (v2, +612) | Solo se procesó el lote 2 (612 líneas). Las 1408 filas del lote 1 no cambiaron (`EXCEPT ALL` contra v1 da 0 y conservan su `_ingestado_en`). `cloud_files_state` lista los dos archivos |
 | Repetir | sin versión nueva | sin versión nueva | sin versión nueva | `EXCEPT ALL` contra v2 da 0 filas en los dos sentidos |
 
-Calidad y métricas se comprobaron igual sobre el lote 1: una segunda corrida no escribió nada en plata ni en cuarentena, y las tablas oro quedaron idénticas.
+Calidad, con el job completo. `plata_departamentos` (12) y `plata_cargos` (25) no cambiaron en ningún momento.
+
+| Momento | `plata_empleados` | `cuarentena` | Qué se comprobó |
+|---|---|---|---|
+| Lote 1 | 1365 (v1) | 43 (v1) | bronce 1408 = 1365 + 43; ninguna fila en las dos tablas ni sin destino |
+| Repetir | sin versión nueva | sin versión nueva | `EXCEPT ALL` contra v1 da 0 filas |
+| Lote 2 | 1945 (v2 retira 2, v3 agrega 582) | 75 (v2, +32) | bronce 2020 = 1945 + 75. Los ids 130 y 881 del lote 1 salieron de plata y están en cuarentena junto con sus versiones del lote 2. Las 43 filas anteriores de la cuarentena conservan su motivo y su `rechazado_en` |
+| Repetir | sin versión nueva | sin versión nueva | `EXCEPT ALL` contra la versión anterior da 0 filas en las dos tablas |
+
+Las tablas oro se reconstruyen completas en cada corrida (`CREATE OR REPLACE`), así que cada corrida crea una versión nueva; lo que se comprueba es que el contenido sea idéntico.
+
+Cuarentena final de empleados por motivo (ninguna fila tiene más de un motivo):
+
+| Motivo | Filas |
+|---|---|
+| `ID_DUPLICADO_COPIA` | 15 |
+| `CAMPO_VACIO:nombre` | 12 |
+| `CAMPO_VACIO:id_cargo` | 11 |
+| `CAMPO_VACIO:fecha_contratacion` | 10 |
+| `ID_DUPLICADO_CONFLICTO` | 10 |
+| `DEPARTAMENTO_NO_EXISTE` | 9 |
+| `FECHA_FORMATO_INVALIDO` | 5 |
+| `FECHA_INEXISTENTE` | 3 |
+| **Total** | **75** |
 
 ## Problemas encontrados en los datos
 
