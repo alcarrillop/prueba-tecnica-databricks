@@ -1,0 +1,49 @@
+# Job único del proyecto. Cada área agrega aquí su tarea con depends_on:
+#   ingesta  -> calidad (depends_on: ingesta) -> metricas (depends_on: calidad)
+# DABs no permite repartir las tareas de un mismo job en varios archivos.
+#
+# Convenciones para las tareas que se agreguen:
+#   - Código en src/<area>/ : lógica en módulos importables + un notebook delgado de entrada.
+#   - Catálogo y esquema llegan como parámetros del job (widgets `catalogo` y `esquema`);
+#     ninguna tarea escribe nombres fijos.
+#   - Tareas SQL: warehouse_id: ${var.warehouse_id}
+#   - Sin clúster: todas las tareas corren en serverless.
+
+resources:
+  jobs:
+    pipeline_talento:
+      name: pipeline_talento
+      description: >-
+        Pipeline de talento humano: ingesta incremental de los CSV del Volume landing a
+        las tablas bronce; luego calidad (plata y cuarentena) y métricas (oro).
+
+      # STANDARD: batch diario sin plazo de entrega; más barato que PERFORMANCE_OPTIMIZED.
+      performance_target: STANDARD
+
+      # Una sola corrida a la vez: dos corridas sobre el mismo checkpoint chocarían.
+      max_concurrent_runs: 1
+      timeout_seconds: 3600
+
+      # Diario a las 06:00 UTC. En dev el modo development la deja pausada;
+      # en prod el target la activa (pause_status: UNPAUSED).
+      schedule:
+        quartz_cron_expression: "0 0 6 * * ?"
+        timezone_id: UTC
+
+      parameters:
+        - name: catalogo
+          default: ${var.catalogo}
+        - name: esquema
+          default: ${var.esquema}
+
+      tags:
+        proyecto: prueba_tecnica
+        aidevkit_project: ai-dev-kit
+
+      tasks:
+        - task_key: ingesta
+          description: >-
+            Auto Loader (availableNow) de landing/<entidad>/ a bronce_<entidad>.
+            Solo procesa archivos nuevos; repetirla sin archivos nuevos no escribe nada.
+          notebook_task:
+            notebook_path: ../src/ingesta/cargar_bronce.py

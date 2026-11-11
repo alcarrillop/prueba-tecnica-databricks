@@ -1,0 +1,58 @@
+# Bundle de la prueba técnica: ingesta, calidad y métricas de talento humano.
+#
+# Uso (siempre con el perfil explícito):
+#   databricks bundle validate -t dev --profile DEFAULT
+#   databricks bundle deploy   -t dev --profile DEFAULT
+#   databricks bundle run pipeline_talento -t dev --profile DEFAULT
+#
+# No se fija host ni perfil aquí: el workspace sale de --profile.
+
+bundle:
+  name: prueba_tecnica
+
+include:
+  - resources/*.yml
+
+# Los CSV solo entran a Databricks por el Volume landing (scripts/subir_archivos.sh),
+# nunca junto con el código. .tmp/ ya queda fuera por .gitignore.
+# .claude/ son las definiciones de los agentes del equipo: el job no las necesita.
+sync:
+  exclude:
+    - datos/**
+    - .claude/**
+
+variables:
+  catalogo:
+    description: Catálogo de Unity Catalog del proyecto.
+    default: workspace
+  esquema:
+    description: Esquema único del proyecto (tablas, Volumes y checkpoints).
+    default: prueba_tecnica
+  warehouse_id:
+    description: SQL warehouse para tareas SQL y consultas de verificación.
+    lookup:
+      warehouse: Serverless Starter Warehouse
+
+targets:
+  # Desarrollo: el job queda con prefijo [dev <usuario>] y su programación pausada.
+  dev:
+    mode: development
+    default: true
+
+  # Producción: definido pero NO desplegado. Solo hay un esquema para la prueba, así que
+  # apunta al mismo workspace.prueba_tecnica que dev. Tablas, Volumes y checkpoints se
+  # nombran por entidad y no por target: si se desplegara aquí, continuaría la misma
+  # carga incremental (mismo checkpoint) en lugar de duplicar filas. En un caso real,
+  # basta con cambiar `esquema` (o `catalogo`) en este bloque.
+  prod:
+    mode: production
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      catalogo: workspace
+      esquema: prueba_tecnica
+    resources:
+      jobs:
+        pipeline_talento:
+          schedule:
+            pause_status: UNPAUSED
