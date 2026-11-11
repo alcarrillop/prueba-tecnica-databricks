@@ -2,7 +2,41 @@
 
 Solución a la prueba técnica de ingeniero de datos descrita en [enunciado.md](enunciado.md): recibir los CSV del sistema viejo, dejarlos en tablas confiables y responder las dos preguntas de talento humano.
 
-> Este README se va completando por fases: las métricas y los problemas del lote 2 se agregan cuando estén listos.
+## Resultados
+
+Con los dos lotes procesados hay 1481 contrataciones válidas en 2021.
+
+**Métrica 2: departamentos que contrataron más que el promedio en 2021.** El promedio es 1481 / 12 = 123,42.
+
+| id | departamento | contratados |
+|---|---|---|
+| 7 | Tecnología | 272 |
+| 4 | Ventas | 264 |
+| 1 | Cadena de Suministro | 197 |
+
+El siguiente es Operaciones, con 122, a 1,42 del promedio. Es el resultado más sensible a las decisiones de calidad. Se comprobó que contar las copias, rescatar las fechas en otro formato o contar las filas sin nombre o sin cargo no lo hacen entrar.
+
+**Métrica 1: contrataciones de 2021 por departamento, cargo y trimestre.** Tiene 285 combinaciones de departamento y cargo, con Q1 366, Q2 366, Q3 363 y Q4 386. Las primeras filas:
+
+| departamento | cargo | Q1 | Q2 | Q3 | Q4 |
+|---|---|---|---|---|---|
+| Cadena de Suministro | Abogado | 3 | 3 | 4 | 4 |
+| Cadena de Suministro | Agente de Soporte | 1 | 3 | 3 | 5 |
+| Cadena de Suministro | Analista de Datos | 4 | 2 | 4 | 0 |
+| Cadena de Suministro | Analista Financiero | 2 | 2 | 2 | 2 |
+| … | | | | | |
+
+Las dos tablas completas, en el orden pedido:
+
+```sql
+SELECT * FROM workspace.prueba_tecnica.oro_contratados_trimestre_2021_ordenada;
+SELECT * FROM workspace.prueba_tecnica.oro_departamentos_sobre_promedio_2021_ordenada;
+```
+
+Cómo se verificaron:
+- Se calcularon una segunda vez de forma independiente, y coinciden celda por celda.
+- Se corrieron con la sesión en Bogotá, Tokio y Nueva York, y no hubo diferencias. Las 32 contrataciones a menos de 24 horas de un cambio de año o de trimestre caen en el trimestre UTC correcto.
+- Dos corridas del job dejan las tablas idénticas.
 
 ## Cómo correrlo
 
