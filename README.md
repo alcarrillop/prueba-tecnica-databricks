@@ -234,3 +234,27 @@ Codificación UTF-8 válida y sin caracteres dañados, número de columnas corre
 ## Cómo se construyó
 
 El trabajo lo hizo un equipo de subagentes de Claude Code definidos en [.claude/agents/](.claude/agents/): `ingesta`, `calidad` y `sql` construyen cada sección, y `entrevistador` califica la entrega con la rúbrica sin confiar en lo que reportan los demás. Las decisiones que el enunciado no aclara se le consultaron al responsable de la prueba antes de construir.
+
+### Calificación con la rúbrica
+
+El agente `entrevistador` calificó la entrega dos veces con la rúbrica del enunciado. Solo dio puntos por lo que comprobó él mismo: consultó las tablas, recalculó la cuarentena y las métricas desde los CSV, corrió el job y las pruebas. No se apoyó en lo que reportaron los otros agentes.
+
+| Criterio | Máx | Ronda 1 | Ronda 2 |
+|---|---|---|---|
+| Ingesta: las tres tablas cargan bien y la carga es incremental | 15 | 15 | 15 |
+| La carga se puede repetir sin cambiar los resultados | 10 | 10 | 10 |
+| Calidad: las filas inválidas quedan en cuarentena con su motivo | 15 | 15 | 15 |
+| Problemas de datos encontrados y reportados | 20 | 20 | 20 |
+| Métrica 1 correcta | 10 | 10 | 10 |
+| Métrica 2 correcta | 10 | 10 | 10 |
+| Bono: bundle, pruebas y job programado | 10 | 10 | 8 |
+| README: decisiones explicadas con argumentos | 10 | 9 | 10 |
+| **Total** | **100** | **99** | **98** |
+
+**Ronda 1 (99).** Devolvió dos frases del README que no coincidían con el código. La primera era cuál copia se conserva entre filas repetidas. La segunda decía que repetir el pipeline no crea versiones nuevas, cuando las tablas oro sí las crean, con el mismo contenido. También observó dos riesgos que no restaron puntos:
+- La ingesta y la calidad trataban las comillas de forma distinta.
+- Producción compartiría checkpoints con desarrollo si se desplegara en el mismo esquema.
+
+Se corrigió todo en los commits `e9c8a69` y `aca671a`, que agregaron la regla `COMILLAS_NO_SOPORTADAS`.
+
+**Ronda 2 (98).** Comprobó que las correcciones resuelven lo devuelto y que no rompieron nada en las tablas ni en el código desplegado. Los 2 puntos del bono se perdieron porque el cómputo serverless de Databricks dejó de responder mientras corría las pruebas, así que no pudo verlas pasar con el código final. No encontró ningún defecto. Las 53 pruebas pasaron sobre ese mismo código en la corrida del agente de calidad (`53 passed in 1423.59s`).
